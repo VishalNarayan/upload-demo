@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Upload to S3 (Presigned URL)</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 40px;
+        max-width: 720px;
+      }
+      .row {
+        margin-bottom: 16px;
+      }
+      button {
+        padding: 8px 12px;
+      }
+      #status {
+        padding: 12px;
+        border: 1px solid #ddd;
+        background: #fafafa;
+        min-height: 24px;
+      }
+      .muted {
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Upload a file to S3</h1>
+    <p class="muted">
+      This page requests a presigned URL from the server, then uploads your file
+      directly to S3.
+    </p>
+
+    <div class="row">
+      <input id="fileInput" type="file" />
+    </div>
+    <div class="row">
+      <button id="uploadBtn">Upload</button>
+    </div>
+    <div id="status" class="row"></div>
+
+    <script>
+      const fileInput = document.getElementById("fileInput");
+      const uploadBtn = document.getElementById("uploadBtn");
+      const statusEl = document.getElementById("status");
+
+      function setStatus(message, isError = false) {
+        statusEl.textContent = message;
+        statusEl.style.borderColor = isError ? "#d33" : "#ddd";
+        statusEl.style.color = isError ? "#d33" : "#000";
+      }
+
+      uploadBtn.addEventListener("click", async () => {
+        const file = fileInput.files[0];
+        if (!file) {
+          setStatus("Please choose a file first.", true);
+          return;
+        }
+
+        setStatus("Requesting presigned URL...");
+
+        try {
+          const params = new URLSearchParams({
+            filename: file.name,
+            contentType: file.type || "application/octet-stream"
+          });
+
+          const presignRes = await fetch(`/api/presign?${params.toString()}`);
+          if (!presignRes.ok) {
+            const errText = await presignRes.text();
+            throw new Error(
+              `Failed to get presigned URL (${presignRes.status}). ${errText}`
+            );
+          }
+
+          const { url, key } = await presignRes.json();
+
+          setStatus("Uploading to S3...");
+
+          const uploadRes = await fetch(url, {
+            method: "PUT",
+            headers: {
+              "Content-Type": file.type || "application/octet-stream"
+            },
+            body: file
+          });
+
+          if (!uploadRes.ok) {
+            const errText = await uploadRes.text();
+            throw new Error(
+              `Upload failed (${uploadRes.status}). ${errText || "No response body."}`
+            );
+          }
+
+          setStatus(`Upload complete. S3 key: ${key}`);
+        } catch (error) {
+          console.error(error);
+          const message =
+            error instanceof TypeError
+              ? `Upload failed due to CORS or network error. Make sure your S3 bucket CORS allows PUT from this origin: ${window.location.origin}.`
+              : error.message || "Upload failed. Check console for details.";
+          setStatus(message, true);
+        }
+      });
+    </script>
+  </body>
+</html>
