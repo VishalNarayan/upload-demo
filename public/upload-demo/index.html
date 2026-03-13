@@ -3,106 +3,591 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Upload to S3 (Presigned URL)</title>
+    <title>Upload to S3</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
     <style>
-      body {
-        font-family: Arial, sans-serif;
-        margin: 40px;
-        max-width: 720px;
+      :root {
+        --bg-deep:    #050811;
+        --bg-card:    rgba(255, 255, 255, 0.04);
+        --border:     rgba(255, 255, 255, 0.10);
+        --border-glow:rgba(99, 179, 237, 0.45);
+        --accent-1:   #63b3ed;
+        --accent-2:   #9f7aea;
+        --accent-3:   #f687b3;
+        --text-primary:   #f0f4ff;
+        --text-muted:     rgba(240, 244, 255, 0.45);
+        --success:    #68d391;
+        --error:      #fc8181;
+        --radius:     20px;
+        --transition: 0.35s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      .row {
+
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+      html, body {
+        height: 100%;
+        font-family: 'Inter', Arial, sans-serif;
+        background: var(--bg-deep);
+        color: var(--text-primary);
+        overflow-x: hidden;
+      }
+
+      /* ── Animated background ────────────────────────────── */
+      .bg {
+        position: fixed; inset: 0; z-index: 0;
+        background: radial-gradient(ellipse 80% 60% at 20% 10%, rgba(99,179,237,0.18) 0%, transparent 60%),
+                    radial-gradient(ellipse 60% 50% at 80% 80%, rgba(159,122,234,0.18) 0%, transparent 60%),
+                    radial-gradient(ellipse 50% 40% at 50% 50%, rgba(246,135,179,0.08) 0%, transparent 70%),
+                    #050811;
+        animation: bgPulse 12s ease-in-out infinite alternate;
+      }
+      @keyframes bgPulse {
+        0%   { filter: brightness(1);   }
+        50%  { filter: brightness(1.12); }
+        100% { filter: brightness(0.92); }
+      }
+
+      /* ── Particle canvas ────────────────────────────────── */
+      #particles { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+
+      /* ── Layout ─────────────────────────────────────────── */
+      .page {
+        position: relative; z-index: 2;
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 16px;
+      }
+
+      /* ── Card ───────────────────────────────────────────── */
+      .card {
+        width: 100%; max-width: 540px;
+        background: var(--bg-card);
+        backdrop-filter: blur(24px) saturate(180%);
+        -webkit-backdrop-filter: blur(24px) saturate(180%);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 48px 44px 44px;
+        box-shadow: 0 0 0 1px rgba(255,255,255,0.03),
+                    0 32px 80px rgba(0,0,0,0.55),
+                    0 0 120px rgba(99,179,237,0.06);
+        animation: cardIn 0.8s cubic-bezier(0.22,1,0.36,1) both;
+      }
+      @keyframes cardIn {
+        from { opacity: 0; transform: translateY(32px) scale(0.97); }
+        to   { opacity: 1; transform: translateY(0)    scale(1);    }
+      }
+
+      /* ── Header ─────────────────────────────────────────── */
+      .header { text-align: center; margin-bottom: 36px; }
+
+      .icon-wrap {
+        width: 68px; height: 68px;
+        margin: 0 auto 20px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 32px rgba(99,179,237,0.35), 0 0 64px rgba(159,122,234,0.25);
+        animation: iconFloat 4s ease-in-out infinite;
+      }
+      @keyframes iconFloat {
+        0%, 100% { transform: translateY(0); }
+        50%       { transform: translateY(-6px); }
+      }
+      .icon-wrap svg { width: 32px; height: 32px; color: #fff; }
+
+      h1 {
+        font-size: 1.65rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, var(--accent-1) 20%, var(--accent-2) 60%, var(--accent-3));
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+      .subtitle {
+        margin-top: 8px;
+        font-size: 0.875rem;
+        font-weight: 400;
+        color: var(--text-muted);
+        line-height: 1.6;
+      }
+
+      /* ── Drop zone ──────────────────────────────────────── */
+      .drop-zone {
+        position: relative;
+        border: 2px dashed var(--border);
+        border-radius: 16px;
+        padding: 36px 24px;
+        text-align: center;
+        cursor: pointer;
+        transition: border-color var(--transition), background var(--transition), box-shadow var(--transition);
+        overflow: hidden;
+        margin-bottom: 24px;
+      }
+      .drop-zone::before {
+        content: '';
+        position: absolute; inset: 0;
+        background: linear-gradient(135deg, rgba(99,179,237,0.06), rgba(159,122,234,0.06));
+        opacity: 0;
+        transition: opacity var(--transition);
+      }
+      .drop-zone:hover,
+      .drop-zone.drag-over {
+        border-color: var(--border-glow);
+        box-shadow: 0 0 0 4px rgba(99,179,237,0.10), inset 0 0 40px rgba(99,179,237,0.05);
+      }
+      .drop-zone:hover::before,
+      .drop-zone.drag-over::before { opacity: 1; }
+      .drop-zone.drag-over { background: rgba(99,179,237,0.04); }
+
+      .drop-icon {
+        width: 48px; height: 48px;
+        margin: 0 auto 12px;
+        color: var(--accent-1);
+        opacity: 0.75;
+        transition: transform var(--transition), opacity var(--transition);
+      }
+      .drop-zone:hover .drop-icon,
+      .drop-zone.drag-over .drop-icon {
+        transform: translateY(-4px) scale(1.08);
+        opacity: 1;
+      }
+
+      .drop-label {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: var(--text-primary);
+        margin-bottom: 4px;
+      }
+      .drop-hint {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+      }
+      .drop-hint span {
+        color: var(--accent-1);
+        font-weight: 600;
+        cursor: pointer;
+      }
+
+      /* Hidden native file input */
+      #fileInput { display: none; }
+
+      /* ── File pill (selected file preview) ──────────────── */
+      .file-pill {
+        display: none;
+        align-items: center;
+        gap: 12px;
+        background: rgba(99,179,237,0.09);
+        border: 1px solid rgba(99,179,237,0.22);
+        border-radius: 12px;
+        padding: 12px 16px;
+        margin-bottom: 24px;
+        animation: pillIn 0.3s cubic-bezier(0.22,1,0.36,1) both;
+      }
+      .file-pill.visible { display: flex; }
+      @keyframes pillIn {
+        from { opacity: 0; transform: translateY(-6px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .pill-icon { color: var(--accent-1); flex-shrink: 0; }
+      .pill-icon svg { width: 20px; height: 20px; }
+      .pill-info { flex: 1; min-width: 0; }
+      .pill-name {
+        font-size: 0.85rem; font-weight: 500;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      }
+      .pill-size { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+      .pill-clear {
+        background: none; border: none; cursor: pointer;
+        color: var(--text-muted); padding: 4px;
+        border-radius: 6px; transition: color var(--transition), background var(--transition);
+        flex-shrink: 0;
+      }
+      .pill-clear:hover { color: var(--error); background: rgba(252,129,129,0.10); }
+      .pill-clear svg { width: 16px; height: 16px; }
+
+      /* ── Upload button ───────────────────────────────────── */
+      .btn-upload {
+        width: 100%;
+        padding: 14px 24px;
+        border: none; border-radius: 14px;
+        font-family: inherit; font-size: 0.95rem; font-weight: 600;
+        cursor: pointer;
+        position: relative; overflow: hidden;
+        background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+        color: #fff;
+        box-shadow: 0 4px 24px rgba(99,179,237,0.30), 0 2px 8px rgba(0,0,0,0.3);
+        transition: transform var(--transition), box-shadow var(--transition), opacity var(--transition);
+        letter-spacing: 0.01em;
+      }
+      .btn-upload::before {
+        content: '';
+        position: absolute; inset: 0;
+        background: linear-gradient(135deg, rgba(255,255,255,0.18) 0%, transparent 60%);
+        pointer-events: none;
+      }
+      .btn-upload:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 32px rgba(99,179,237,0.40), 0 4px 12px rgba(0,0,0,0.4);
+      }
+      .btn-upload:active:not(:disabled) { transform: translateY(0); }
+      .btn-upload:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+      .btn-inner { display: flex; align-items: center; justify-content: center; gap: 8px; }
+      .btn-upload svg { width: 18px; height: 18px; }
+
+      /* Shimmer on button */
+      .btn-upload::after {
+        content: '';
+        position: absolute;
+        top: 0; left: -100%;
+        width: 60%; height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+        transform: skewX(-20deg);
+        animation: shimmer 3s ease-in-out infinite;
+      }
+      @keyframes shimmer {
+        0%   { left: -100%; }
+        50%  { left: 160%; }
+        100% { left: 160%; }
+      }
+
+      /* ── Progress bar ────────────────────────────────────── */
+      .progress-wrap {
+        display: none;
         margin-bottom: 16px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.07);
+        height: 6px;
+        overflow: hidden;
       }
-      button {
-        padding: 8px 12px;
+      .progress-wrap.visible { display: block; }
+      .progress-bar {
+        height: 100%; width: 0%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent-1), var(--accent-2), var(--accent-3));
+        background-size: 200% 100%;
+        transition: width 0.3s ease;
+        animation: gradMove 2s linear infinite;
       }
-      #status {
-        padding: 12px;
-        border: 1px solid #ddd;
-        background: #fafafa;
-        min-height: 24px;
+      @keyframes gradMove {
+        0%   { background-position: 0%   50%; }
+        100% { background-position: 200% 50%; }
       }
-      .muted {
-        color: #666;
+
+      /* ── Status box ─────────────────────────────────────── */
+      .status-box {
+        min-height: 48px;
+        border-radius: 14px;
+        padding: 14px 18px;
+        font-size: 0.85rem;
+        line-height: 1.55;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        border: 1px solid transparent;
+        background: rgba(255,255,255,0.03);
+        color: var(--text-muted);
+        transition: background var(--transition), border-color var(--transition), color var(--transition);
+        margin-top: 16px;
+        word-break: break-word;
+        animation: statusIn 0.3s ease both;
       }
+      @keyframes statusIn {
+        from { opacity: 0; transform: translateY(4px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+      .status-box.info   { background: rgba(99,179,237,0.08); border-color: rgba(99,179,237,0.22); color: var(--accent-1); }
+      .status-box.success{ background: rgba(104,211,145,0.08); border-color: rgba(104,211,145,0.25); color: var(--success); }
+      .status-box.error  { background: rgba(252,129,129,0.08); border-color: rgba(252,129,129,0.25); color: var(--error); }
+
+      .status-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        flex-shrink: 0; margin-top: 5px;
+        background: currentColor;
+      }
+      .status-dot.spin {
+        background: none;
+        border: 2px solid currentColor;
+        border-top-color: transparent;
+        animation: spin 0.8s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      /* ── Footer ─────────────────────────────────────────── */
+      .footer {
+        margin-top: 28px; text-align: center;
+        font-size: 0.75rem; color: var(--text-muted);
+        letter-spacing: 0.01em;
+      }
+      .footer a { color: var(--accent-1); text-decoration: none; }
+      .footer a:hover { text-decoration: underline; }
     </style>
   </head>
   <body>
-    <h1>Upload a file to S3</h1>
-    <p class="muted">
-      This page requests a presigned URL from the server, then uploads your file
-      directly to S3.
-    </p>
+    <div class="bg"></div>
+    <canvas id="particles"></canvas>
 
-    <div class="row">
-      <input id="fileInput" type="file" />
-    </div>
-    <div class="row">
-      <button id="uploadBtn">Upload</button>
-    </div>
-    <div id="status" class="row"></div>
+    <main class="page">
+      <div class="card">
+
+        <header class="header">
+          <div class="icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 16 12 12 8 16"/>
+              <line x1="12" y1="12" x2="12" y2="21"/>
+              <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+            </svg>
+          </div>
+          <h1>Upload to S3</h1>
+          <p class="subtitle">Securely transfer your file via a presigned URL — no credentials exposed.</p>
+        </header>
+
+        <!-- Drop zone -->
+        <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-label="Click or drag a file to upload">
+          <svg class="drop-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          <p class="drop-label">Drop your file here</p>
+          <p class="drop-hint">or <span id="browseLink">browse to choose</span></p>
+          <input id="fileInput" type="file" />
+        </div>
+
+        <!-- Selected file pill -->
+        <div class="file-pill" id="filePill">
+          <span class="pill-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+          </span>
+          <div class="pill-info">
+            <div class="pill-name" id="pillName"></div>
+            <div class="pill-size" id="pillSize"></div>
+          </div>
+          <button class="pill-clear" id="pillClear" aria-label="Remove file">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Progress bar -->
+        <div class="progress-wrap" id="progressWrap">
+          <div class="progress-bar" id="progressBar"></div>
+        </div>
+
+        <!-- Upload button -->
+        <button class="btn-upload" id="uploadBtn">
+          <span class="btn-inner">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="16 16 12 12 8 16"/>
+              <line x1="12" y1="12" x2="12" y2="21"/>
+              <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+            </svg>
+            Upload File
+          </span>
+        </button>
+
+        <!-- Status -->
+        <div class="status-box" id="statusBox">
+          <span class="status-dot"></span>
+          <span id="statusText">Waiting for a file…</span>
+        </div>
+
+      </div>
+
+      <p class="footer">Powered by AWS S3 &amp; presigned URLs &mdash; <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/PresignedUrlUploadObject.html" target="_blank" rel="noopener">learn more</a></p>
+    </main>
 
     <script>
-      const fileInput = document.getElementById("fileInput");
-      const uploadBtn = document.getElementById("uploadBtn");
-      const statusEl = document.getElementById("status");
+      /* ── Particle system ────────────────────────────────── */
+      (function () {
+        const canvas = document.getElementById('particles');
+        const ctx = canvas.getContext('2d');
+        let W, H, stars = [];
 
-      function setStatus(message, isError = false) {
-        statusEl.textContent = message;
-        statusEl.style.borderColor = isError ? "#d33" : "#ddd";
-        statusEl.style.color = isError ? "#d33" : "#000";
+        function resize() {
+          W = canvas.width  = window.innerWidth;
+          H = canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', () => { resize(); initStars(); });
+
+        function rand(min, max) { return Math.random() * (max - min) + min; }
+
+        function initStars() {
+          const count = Math.floor((W * H) / 8000);
+          stars = Array.from({ length: count }, () => ({
+            x: rand(0, W), y: rand(0, H),
+            r: rand(0.4, 1.8),
+            alpha: rand(0.15, 0.65),
+            speed: rand(0.05, 0.25),
+            dx: rand(-0.15, 0.15),
+            dy: rand(-0.05, -0.25),
+          }));
+        }
+        initStars();
+
+        function draw() {
+          ctx.clearRect(0, 0, W, H);
+          for (const s of stars) {
+            ctx.beginPath();
+            ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(180,210,255,${s.alpha})`;
+            ctx.fill();
+            s.x += s.dx;
+            s.y += s.dy;
+            if (s.y < -4) { s.y = H + 4; s.x = rand(0, W); }
+            if (s.x < -4) s.x = W + 4;
+            if (s.x > W + 4) s.x = -4;
+          }
+          requestAnimationFrame(draw);
+        }
+        draw();
+      })();
+
+      /* ── Upload logic ────────────────────────────────────── */
+      const fileInput   = document.getElementById('fileInput');
+      const dropZone    = document.getElementById('dropZone');
+      const browseLink  = document.getElementById('browseLink');
+      const uploadBtn   = document.getElementById('uploadBtn');
+      const filePill    = document.getElementById('filePill');
+      const pillName    = document.getElementById('pillName');
+      const pillSize    = document.getElementById('pillSize');
+      const pillClear   = document.getElementById('pillClear');
+      const progressWrap= document.getElementById('progressWrap');
+      const progressBar = document.getElementById('progressBar');
+      const statusBox   = document.getElementById('statusBox');
+      const statusText  = document.getElementById('statusText');
+      const statusDot   = statusBox.querySelector('.status-dot');
+
+      function formatBytes(b) {
+        if (b < 1024) return b + ' B';
+        if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+        return (b / (1024 * 1024)).toFixed(2) + ' MB';
       }
 
-      uploadBtn.addEventListener("click", async () => {
-        const file = fileInput.files[0];
-        if (!file) {
-          setStatus("Please choose a file first.", true);
-          return;
-        }
+      function setStatus(msg, type = 'idle') {
+        // Re-trigger animation
+        statusBox.style.animation = 'none';
+        statusBox.offsetHeight; // reflow
+        statusBox.style.animation = '';
 
-        setStatus("Requesting presigned URL...");
+        statusBox.className = 'status-box';
+        statusDot.className = 'status-dot';
+
+        if (type === 'loading') {
+          statusBox.classList.add('info');
+          statusDot.classList.add('spin');
+        } else if (type === 'success') {
+          statusBox.classList.add('success');
+        } else if (type === 'error') {
+          statusBox.classList.add('error');
+        }
+        statusText.textContent = msg;
+      }
+
+      function setProgress(pct) {
+        progressWrap.classList.toggle('visible', pct > 0 && pct < 100);
+        progressBar.style.width = pct + '%';
+      }
+
+      function showFile(file) {
+        pillName.textContent = file.name;
+        pillSize.textContent = formatBytes(file.size);
+        filePill.classList.add('visible');
+        setStatus('Ready to upload.', 'idle');
+      }
+
+      function clearFile() {
+        fileInput.value = '';
+        filePill.classList.remove('visible');
+        setProgress(0);
+        setStatus('Waiting for a file…', 'idle');
+      }
+
+      /* Drag & drop */
+      dropZone.addEventListener('click', () => fileInput.click());
+      browseLink.addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+      dropZone.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+      dropZone.addEventListener('dragover',  (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+      dropZone.addEventListener('dragleave', (e) => { if (!dropZone.contains(e.relatedTarget)) dropZone.classList.remove('drag-over'); });
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file) { fileInput._selectedFile = file; showFile(file); }
+      });
+
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) showFile(fileInput.files[0]);
+      });
+
+      pillClear.addEventListener('click', (e) => { e.stopPropagation(); fileInput._selectedFile = null; clearFile(); });
+
+      /* Upload */
+      uploadBtn.addEventListener('click', async () => {
+        const file = fileInput._selectedFile || fileInput.files[0];
+        if (!file) { setStatus('Please choose a file first.', 'error'); return; }
+
+        uploadBtn.disabled = true;
+        setProgress(10);
+        setStatus('Requesting presigned URL…', 'loading');
 
         try {
           const params = new URLSearchParams({
-            filename: file.name,
-            contentType: file.type || "application/octet-stream"
+            filename:    file.name,
+            contentType: file.type || 'application/octet-stream',
           });
-
-          const presignRes = await fetch(`/api/presign?${params.toString()}`);
+          const presignRes = await fetch(`/api/presign?${params}`);
           if (!presignRes.ok) {
             const errText = await presignRes.text();
-            throw new Error(
-              `Failed to get presigned URL (${presignRes.status}). ${errText}`
-            );
+            throw new Error(`Failed to get presigned URL (${presignRes.status}). ${errText}`);
           }
-
           const { url, key } = await presignRes.json();
 
-          setStatus("Uploading to S3...");
+          setProgress(35);
+          setStatus('Uploading to S3…', 'loading');
 
-          const uploadRes = await fetch(url, {
-            method: "PUT",
-            headers: {
-              "Content-Type": file.type || "application/octet-stream"
-            },
-            body: file
+          await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.upload.addEventListener('progress', (e) => {
+              if (e.lengthComputable) {
+                setProgress(35 + Math.round((e.loaded / e.total) * 60));
+              }
+            });
+            xhr.addEventListener('load', () => {
+              if (xhr.status >= 200 && xhr.status < 300) resolve();
+              else reject(new Error(`Upload failed (${xhr.status}). ${xhr.responseText || 'No response body.'}`));
+            });
+            xhr.addEventListener('error', () => reject(new TypeError('Network error during upload.')));
+            xhr.send(file);
           });
 
-          if (!uploadRes.ok) {
-            const errText = await uploadRes.text();
-            throw new Error(
-              `Upload failed (${uploadRes.status}). ${errText || "No response body."}`
-            );
-          }
+          setProgress(100);
+          setStatus(`Upload complete! S3 key: ${key}`, 'success');
+          setTimeout(() => setProgress(0), 1200);
 
-          setStatus(`Upload complete. S3 key: ${key}`);
-        } catch (error) {
-          console.error(error);
-          const message =
-            error instanceof TypeError
-              ? `Upload failed due to CORS or network error. Make sure your S3 bucket CORS allows PUT from this origin: ${window.location.origin}.`
-              : error.message || "Upload failed. Check console for details.";
-          setStatus(message, true);
+        } catch (err) {
+          console.error(err);
+          setProgress(0);
+          const msg = err instanceof TypeError
+            ? `Upload failed due to a CORS or network error. Make sure your S3 bucket allows PUT from: ${window.location.origin}`
+            : err.message || 'Upload failed. Check console for details.';
+          setStatus(msg, 'error');
+        } finally {
+          uploadBtn.disabled = false;
         }
       });
     </script>
